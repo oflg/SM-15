@@ -7,18 +7,18 @@
 
 class @SM
   constructor: ->
-    @requestedFI = 10
-    @intervalBase = 3 * 60 * 60 * 1000
-    @q = []  # items sorted by dueDate
-    @fi_g = new FI_G @
-    @forgettingCurves = new ForgettingCurves @
-    @rfm = new RFM @
-    @ofm = new OFM @
+    @requestedFI = 10 #默认遗忘指数
+    @intervalBase = 24 * 60 * 60 * 1000 #初始间隔
+    @q = []  # items sorted by dueDate #卡片列表
+    @fi_g = new FI_G @ #FI-G graph，遗忘指数-评分图。评分与遗忘指数 - FI-G图将预期遗忘指数与重复时的评分联系起来。你需要了解SuperMemo算法SM-15来理解这个图形。你可以想象，遗忘曲线图可能在其纵轴上使用平均评分而不是保留率。如果你将这个评分与遗忘指数相关联，你就会得出FI-G图。这个图形被用来计算一个估计的遗忘指数，而这个指数又被用来对评分进行归一化处理（对于延迟的或高级的重复），并估计项目的A因子的新值。评分是用公式计算出来的。评分=Exp(A*FI+B)，即e^{A*FI+B}其中A和B是对复读期间收集的原始数据进行指数回归的参数。
+    @forgettingCurves = new ForgettingCurves @ #遗忘曲线。遗忘曲线。RF矩阵的各个条目是根据每个条目的近似遗忘曲线来计算的。每条遗忘曲线都对应着不同的重复次数和不同的A因子值（或在第一次重复的情况下的记忆断层）。RF矩阵条目的值对应于遗忘曲线通过从所要求的遗忘指数得出的知识保留点的时间点。例如，对于一个新项目的第一次重复，如果遗忘指数等于10%，四天后，遗忘曲线所表示的知识保留率下降到90%以下的数值，RF[1,1]的值就被当作4。这意味着所有进入学习过程的项目将在四天后被重复学习（假设矩阵OF和RF在第一列的第一行没有差异）。这满足了SuperMemo的主要前提，即重复应该发生在遗忘概率等于100%减去以百分比表示的遗忘指数的时刻。
+    @rfm = new RFM @ #RF matrix，RF矩阵是retention factor保留度的矩阵。矩阵的列与项目易度相对应，矩阵的行与记忆稳定性相对应。RF矩阵在SuperMemo 6中被引入，并被用于所有版本的算法，直到算法SM-15。在后来的算法中，它的等价物是对应于检索性等于0.9的稳定性增加矩阵的片断。
+    @ofm = new OFM @ #OF matrix，OF矩阵是optimum factor 最佳记忆度的矩阵。从RF矩阵推导出OF矩阵。OF矩阵的最佳值是通过一连串的近似程序从RF矩阵中得出的，RF矩阵的定义与OF矩阵相同，不同的是它的值取自被优化的学生的真实学习过程。最初，OF和RF矩阵是相同的；然而，RF矩阵的条目在每次重复时都会被修改，OF矩阵的新值是通过使用近似程序从RF矩阵计算出来的。这有效地产生了OF矩阵作为RF矩阵的平滑形式。简单地说，RF矩阵在任何给定的时刻都对应于从学习过程中得到的最佳拟合值；然而，每个条目被认为是其自身的最佳拟合条目，即从其他RF条目的值中抽象出来。同时，OF矩阵被认为是一个最佳匹配的整体。换句话说，在重复过程中，RF矩阵是逐条计算的，而OF矩阵是RF矩阵的一个平滑副本。
     
   _findIndexToInsert: (item, r = [0...@q.length]) =>
     return 0 if r.length == 0
     v = item.dueDate
-    i = Math.floor (r.length / 2)
+    i = Math.floor (r.length / 2) #向下取整、
     if r.length == 1
       return if v < @q[r[i]].dueDate then r[i] else r[i] + 1
     return @_findIndexToInsert item, (if v < @q[r[i]].dueDate then r[...i] else r[i..])
@@ -67,40 +67,41 @@ class @SM
     return sm
     
 
-RANGE_AF = 20
-RANGE_REPETITION = 20
+RANGE_AF = 20 #绝对易度范围
+RANGE_REPETITION = 20 #重复范围
 
-MIN_AF = 1.2
-NOTCH_AF = 0.3
-MAX_AF = MIN_AF + NOTCH_AF * (RANGE_AF - 1)
+MIN_AF = 1.2 #最小绝对易度
+NOTCH_AF = 0.3  #绝对易度档位
+MAX_AF = MIN_AF + NOTCH_AF * (RANGE_AF - 1)#最大绝对易度
 
-MAX_GRADE = 5
-THRESHOLD_RECALL = 3
+MAX_GRADE = 5 #最大评分
+THRESHOLD_RECALL = 3 #表示记起的评分阈值
 
 
 class Item
-  MAX_AFS_COUNT = 30
+  MAX_AFS_COUNT = 30 #最大绝对易度记录数量
     
   constructor: (@sm, @value) ->
-    @lapse = 0
-    @repetition = -1
-    @of = 1
-    @optimumInterval = @sm.intervalBase
-    @dueDate = new Date 0
-    @_afs = []
+    @lapse = 0 #记忆偏差次数
+    @repetition = -1 #重复次数
+    @of = 1 #optimum factor 最佳记忆度
+    @optimumInterval = @sm.intervalBase #最佳间隔
+    @dueDate = new Date 0 #到期时间
+    @_afs = [] #绝对易度记录
  
   interval: (now = new Date())=>
     return @sm.intervalBase if not @previousDate?
     return now - @previousDate
 
-  uf: (now = new Date()) =>
+  #used interval ratio factor 间隔改变率
+  uf: (now = new Date()) => 
     return @interval(now) / (@optimumInterval / @of)
 
   # A-Factor
-  af: (value = undefined) =>
+  af: (value = undefined) => 
     return @_af if not value?
-    a = Math.round((value - MIN_AF) / NOTCH_AF)
-    @_af = Math.max MIN_AF, Math.min MAX_AF, MIN_AF + a * NOTCH_AF
+    a = Math.round((value - MIN_AF) / NOTCH_AF) # a值=(输入值-最小绝对易度)/绝对易度档位，再四舍五入
+    @_af = Math.max MIN_AF, Math.min MAX_AF, MIN_AF + a * NOTCH_AF # 绝对易度=max(最小绝对易度,min(最大绝对易度,最小绝对易度+a值*绝对易度档位))
     
   afIndex: =>
     afs = (MIN_AF + i * NOTCH_AF for i in [0...RANGE_AF])
@@ -120,8 +121,8 @@ class Item
 
   # 9. 11. Update A-Factor
   _updateAF: (grade, now = new Date()) =>
-    estimatedFI = Math.max 1, @sm.fi_g.fi grade
-    correctedUF = @uf(now) * (@sm.requestedFI / estimatedFI)
+    estimatedFI = Math.max 1, @sm.fi_g.fi grade #estimatedFI，预估遗忘指数
+    correctedUF = @uf(now) * (@sm.requestedFI / estimatedFI) #correctedUF，矫正遗忘指数
     estimatedAF = 
       if @repetition > 0
         @sm.ofm.af @repetition, correctedUF
@@ -177,6 +178,7 @@ class FI_G
       
   #10. Update regression of FI-G graph
   update: (grade, item, now = new Date()) =>
+    预期遗忘指数
     expectedFI = =>
       return (item.uf(now) / item.of) * @sm.requestedFI  # assuming linear forgetting curve for simplicity
       ### A way to get the expected forgetting index using a forgetting curve
@@ -188,7 +190,7 @@ class FI_G
     @_registerPoint expectedFI(), grade
     @_graph = null
 
-  # Estimated forgetting index
+  # Estimated forgetting index 预估遗忘指数
   fi: (grade) =>
     @_graph ?= exponentialRegression @points
     return Math.max 0, Math.min 100, @_graph?.x (grade + GRADE_OFFSET)
@@ -309,7 +311,7 @@ sum = (values) ->
 mse = (y, points) ->
   return sum(Math.pow(y(points[i][0]) - points[i][1], 2) for i in [0...points.length]) / points.length
 
-# reference: http://mathworld.wolfram.com/LeastSquaresFittingExponential.html
+# reference: http://mathworld.wolfram.com/LeastSquaresFittingExponential.html 指数回归分析
 exponentialRegression = (points) ->
   n = points.length
   X = (p[0] for p in points)
@@ -335,7 +337,7 @@ exponentialRegression = (points) ->
     mse: -> mse _y, points
   }
 
-# Least squares method
+# Least squares method 线性回归分析
 linearRegression = (points) ->
   n = points.length
   X = (p[0] for p in points)
@@ -358,12 +360,14 @@ linearRegression = (points) ->
     b: b
   }
 
+#幂次模型
 powerLawModel = (a, b) ->
   y: (x) -> a * Math.pow(x, b)
   x: (y) -> Math.pow (y / a), (1 / b)
   a: a
   b: b
 
+#幂次回归分析
 # reference: http://mathworld.wolfram.com/LeastSquaresFittingPowerLaw.html
 powerLawRegression = (points) ->
   n = points.length
@@ -385,6 +389,7 @@ powerLawRegression = (points) ->
   model.mse = -> mse _y, points
   return model
 
+#修改幂次回归分析
 fixedPointPowerLawRegression = (points, fixedPoint) ->
   ###
     given fixed point: (p, q)
@@ -405,6 +410,7 @@ fixedPointPowerLawRegression = (points, fixedPoint) ->
   model = powerLawModel (q / Math.pow p, b), b
   return model
   
+#过原点的线性回归分析
 linearRegressionThroughOrigin = (points) ->
   n = points.length
   X = (p[0] for p in points)
